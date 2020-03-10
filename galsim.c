@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
+
 
 typedef struct _particle
 {
@@ -28,6 +30,13 @@ typedef struct _particleBox
   int isEmpty;
   int isLeaf;
 } particleBox;
+
+typedef struct _forceInfo
+{
+  struct _particleBox *box;
+  double thetaMax;
+  struct _particle *star;
+} forceInfo;
 
 particle ** read_particle(int N, char * filename) {
   FILE* file = fopen(filename, "rb");
@@ -193,28 +202,72 @@ void calcMass(particleBox * box){
   }
 }
 
+//void calcForce(particle *star, particleBox *box, double thetaMax){
+  /*
+void * calcForce(void *arg){
+  forceInfo *input = (forceInfo *)arg;
+  particle **stars = input->stars;
+  particleBox *box = input->box;
+  double thetaMax = input->thetaMax;
+  int n_threads = input->n_threads;
+  int N = input->N;
+
+  int thread_part = part++;
+
+  for (int i = thread_part * N / n_threads; i < (thread_part + 1) * (N / n_threads); i++) {
+    double rx, ry, denom;
+    double e0 = 0.001;
+    rx = stars[i]->posX - box->centerOfMassX;
+    ry = stars[i]->posY - box->centerOfMassY;
+    double r = sqrt(rx*rx+ry*ry);
+    if(box->isLeaf || (box->side / r) <= thetaMax){
+      denom = (r+e0)*(r+e0)*(r+e0);
+      stars[i]->Fx += box->mass * rx / denom;
+      stars[i]->Fy += box->mass * ry / denom;
+    } 
+    else {
+      input->box = box->nw;
+      calcForce(input);
+      input->box = box->ne;
+      calcForce(input);
+      input->box = box->sw;
+      calcForce(input);
+      input->box = box->se;
+      calcForce(input);
+    }
+  }
+}
+*/
+
+
+
 void calcForce(particle *star, particleBox *box, double thetaMax){
   double rx, ry, denom;
   double e0 = 0.001;
   rx = star->posX - box->centerOfMassX;
   ry = star->posY - box->centerOfMassY;
   double r = sqrt(rx*rx+ry*ry);
- // if(box->star != star){
-/*     if(box->isEmpty){
-      
-    } */
-     if(box->isLeaf || (box->side / r) <= thetaMax){
-      denom = (r+e0)*(r+e0)*(r+e0);
-      star->Fx += box->mass * rx / denom;
-      star->Fy += box->mass * ry / denom;
-    } 
-    else {
-      calcForce(star, box->nw, thetaMax);
-      calcForce(star, box->ne, thetaMax);
-      calcForce(star, box->sw, thetaMax);
-      calcForce(star, box->se, thetaMax);
-    }
-  //}
+  if(box->isLeaf || (box->side / r) <= thetaMax){
+    denom = (r+e0)*(r+e0)*(r+e0);
+    star->Fx += box->mass * rx / denom;
+    star->Fy += box->mass * ry / denom;
+  } 
+  else {
+    calcForce(star, box->nw, thetaMax);
+    calcForce(star, box->ne, thetaMax);
+    calcForce(star, box->sw, thetaMax);
+    calcForce(star, box->se, thetaMax);
+  }
+}
+
+void * work(void *arg) {
+  forceInfo *input = (forceInfo *)arg;
+  particle *star = input->star;
+  particleBox *box = input->box;
+  double thetaMax = input->thetaMax;
+  printf("hej\n");
+  calcForce(star, box, thetaMax);
+  pthread_exit(NULL);
 }
 
 void deleteBoxes(particleBox * box) {
@@ -264,7 +317,7 @@ particleBox* buildTree(particle ** array, int N) {
 }
 
 int main(int argc, char* argv[]){  
-  if (argc != 7){
+  if (argc != 8){
       printf("Wrong number of input arguments\n");
       return 1;
   }  
@@ -274,22 +327,39 @@ int main(int argc, char* argv[]){
   double delta_t = atof(argv[4]);
   double theta_max = atof(argv[5]);
   int graphics = atoi(argv[6]);
-  printf("Command line arguments given: %d, %s, %d, %f, %f, %d \n", N, filename, n_steps, delta_t, theta_max, graphics);
+  int n_threads = atoi(argv[7]);
+  printf("Command line arguments given: %d, %s, %d, %f, %f, %d, %d \n", N, filename, n_steps, delta_t, theta_max, graphics, n_threads);
   const double G = 100.0 / N;
+
+  pthread_t threads[n_threads];
+  void *status;
+
   particle **array = read_particle(N, filename);
   //printArray(array, N);
   particleBox *root = NULL;
   for(int i = 0; i<n_steps; i++) {
     root = buildTree(array, N);
     calcMass(root);
-    for(int j =0; j<N; j++){
-      array[j]->Fx = 0;
-      array[j]->Fy = 0;
-
-      calcForce(array[j], root, theta_max);
-
-      array[j]->Fx *= -G;
-      array[j]->Fy *= -G;
+    for(int j=0; j<N; j=j+n_threads){
+      
+      forceInfo *input = malloc(sizeof(forceInfo));
+      input->box = root;
+      input->thetaMax = theta_max;
+      int h = 0;
+      while (h < n_threads && j+h < N) {
+        array[j+h]->Fx = 0;
+        array[j+h]->Fy = 0;
+        input->star = array[j+h];
+        printf("j is %d and h is %d\n", j, h);
+        pthread_create(&threads[h], NULL, work, &input);
+        h++;
+      }
+      for(int t=0; t<n_threads; t++) {
+        pthread_join(threads[t], &status);
+        array[j+t]->Fx *= -G;
+        array[j+t]->Fy *= -G;
+      }
+      free(input);
     }
     deleteBoxes(root);
     for (int j = 0; j < N; j++) {
