@@ -1,4 +1,4 @@
-CFLAGS= -g -pg -Wall -Ofast -pthreads
+CFLAGS= -g -pg -Wall -Ofast -pthread
 
 galsim: galsim.o
 	gcc -o galsim galsim.o -lm

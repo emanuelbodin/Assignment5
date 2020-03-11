@@ -5,6 +5,7 @@
 #include <pthread.h>
 
 
+
 typedef struct _particle
 {
   double posX, posY, mass, velX, velY, b, Fx, Fy;
@@ -33,17 +34,12 @@ typedef struct _particleBox
 
 typedef struct _thread_data
 {
-  struct _particleBox *box;
+  struct _particle *star;
   int tid;
 } thread_data;
 
-particle **array1;
-int N1;
-double theta_max1;
 particleBox *root1;
-double G1;
-int n_threads1;
-
+double theta_max1;
 
 particle ** read_particle(int N, char * filename) {
   FILE* file = fopen(filename, "rb");
@@ -269,19 +265,8 @@ void calcForce(particle *star, particleBox *box, double thetaMax){
 
 void * work(void *arg) {
   thread_data *input = (thread_data *)arg;
-  int status = 1;
-  int tid = input->tid;
-  int start = tid*N1/n_threads1;
-  int limit = (tid+1)*N1/n_threads1;
-  //printf("ID: %d, start: %d, limit: %d\n", tid, start, limit);
-  for (int i=start;i<limit; i++) {
-    //printf("%d\n", i);
-    array1[i]->Fx = 0;
-    array1[i]->Fy = 0; 
-    calcForce(array1[i], root1, theta_max1);
-    array1[i]->Fx *= -G1;
-    array1[i]->Fy *= -G1;
-  }
+  particle *star = input->star;
+  calcForce(star, root1, theta_max1);
   //printf("Thread %d finished\n", tid);
   pthread_exit(NULL);
 }
@@ -352,40 +337,18 @@ int main(int argc, char* argv[]){
   void *status;
 
   particle **array = read_particle(N, filename);
-  array1 = array;
-  theta_max1 = theta_max;
-  N1 = N;
-  G1  = G;
-  n_threads1 = n_threads;
   //printArray(array, N);
   particleBox *root = NULL;
   for(int i = 0; i<n_steps; i++) {
     root = buildTree(array, N);
-    root1  =root;
+    root1 = root;
+    theta_max1 = theta_max;
     calcMass(root);
-    for(int j=0; j<n_threads; j++){
-        thread_data_array[j].tid = j;  
-        pthread_create(&threads[j], NULL, work, (void *)&thread_data_array[j]);
-        //printf("Thread %d created\n", h);
-      }
-      for(int t=0; t<n_threads; t++) {
-        int rc = pthread_join(threads[t], &status);
-        if (rc) {
-          printf("ERROR");
-          exit(-1);
-        }
-        //printf("Thread %d closed \n", t);
-        
-      }
     
-    /*
     for(int j=0; j<N; j=j+n_threads){
       int h = 0;
       while (h < n_threads && j+h < N) {
-        thread_data_array[h].box = root;
         thread_data_array[h].star = array[j+h];
-        thread_data_array[h].thetaMax = theta_max;
-        thread_data_array[h].tid = h;
         array[j+h]->Fx = 0;
         array[j+h]->Fy = 0;        
         pthread_create(&threads[h], NULL, work, (void *)&thread_data_array[h]);
@@ -403,7 +366,6 @@ int main(int argc, char* argv[]){
         array[j+t]->Fy *= -G;
       }
     }
-    */
     deleteBoxes(root);
     for (int j = 0; j < N; j++) {
       array[j]->velX += delta_t*array[j]->Fx;
